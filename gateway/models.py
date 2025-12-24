@@ -36,7 +36,7 @@ class ReadyMessage(BaseModel):
     """Server ready message sent on connection."""
     type: Literal["ready"] = "ready"
     version: str = "1.0.0"
-    models: list[str] = ["chatterbox-turbo", "chatterbox-multilingual"]
+    models: list[str] = ["chatterbox-standard"]  # Standard model with expressiveness
     default_format: str = "opus"
 
 

@@ -50,9 +50,10 @@ def get_device() -> str:
     return "cpu"
 
 
-# Configuration
+# Configuration - By default, only load the expressive standard model
 LOAD_MULTILINGUAL = os.getenv("LOAD_MULTILINGUAL", "false").lower() == "true"
-LOAD_STANDARD = os.getenv("LOAD_STANDARD", "true").lower() == "true"  # Load expressive model
+LOAD_STANDARD = os.getenv("LOAD_STANDARD", "true").lower() == "true"  # Load expressive model (recommended)
+LOAD_TURBO = os.getenv("LOAD_TURBO", "false").lower() == "true"  # Turbo is faster but no expressiveness
 
 
 def load_models():
@@ -82,16 +83,21 @@ def load_models():
         except Exception as e:
             logger.warning(f"Failed to load ChatterboxTTS: {e}")
 
-    # Load turbo model for speed
-    try:
-        from chatterbox.tts_turbo import ChatterboxTurboTTS
-        logger.info("Loading ChatterboxTurboTTS...")
-        tts_turbo_model = ChatterboxTurboTTS.from_pretrained(device=device)
-        logger.info("ChatterboxTurboTTS loaded successfully")
-    except Exception as e:
-        logger.error(f"Failed to load ChatterboxTurboTTS: {e}")
-        if tts_standard_model is None:
-            raise  # Need at least one model
+    # Load turbo model only if explicitly enabled (no expressiveness support)
+    if LOAD_TURBO:
+        try:
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
+            logger.info("Loading ChatterboxTurboTTS...")
+            tts_turbo_model = ChatterboxTurboTTS.from_pretrained(device=device)
+            logger.info("ChatterboxTurboTTS loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load ChatterboxTurboTTS: {e}")
+    else:
+        logger.info("Skipping ChatterboxTurboTTS (LOAD_TURBO=false) - using expressive model only")
+
+    # Ensure at least one model is loaded
+    if tts_standard_model is None and tts_turbo_model is None:
+        raise RuntimeError("No TTS model loaded. Enable LOAD_STANDARD=true or LOAD_TURBO=true")
 
     if LOAD_MULTILINGUAL:
         try:
@@ -184,26 +190,24 @@ async def synthesize_and_stream(
     start_time = time.time()
 
     try:
-        # Select model based on request and availability
-        logger.info(f"[{request.id}] Requested model: {request.model}, voice params: exag={request.voice.exaggeration}, cfg={request.voice.cfg_weight}")
-        use_standard = request.model == "standard" and tts_standard_model is not None
+        # Select model - prefer standard (expressive) by default
+        logger.info(f"[{request.id}] Voice params: exag={request.voice.exaggeration}, cfg={request.voice.cfg_weight}")
 
         if request.language_id != "en" and multilingual_model is not None:
             model = multilingual_model
             model_name = "chatterbox-multilingual"
             is_standard = False
-        elif use_standard:
+        elif tts_standard_model is not None:
+            # Always prefer standard model for expressiveness
             model = tts_standard_model
             model_name = "chatterbox-standard"
             is_standard = True
         elif tts_turbo_model is not None:
+            # Fallback to turbo if standard not available
             model = tts_turbo_model
             model_name = "chatterbox-turbo"
             is_standard = False
-        elif tts_standard_model is not None:
-            model = tts_standard_model
-            model_name = "chatterbox-standard"
-            is_standard = True
+            logger.warning(f"[{request.id}] Using turbo model - expressiveness params will be ignored")
         else:
             raise RuntimeError("No TTS model available")
 
