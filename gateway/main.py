@@ -104,6 +104,28 @@ def load_models():
     else:
         logger.info("Skipping ChatterboxMultilingualTTS (LOAD_MULTILINGUAL=false)")
 
+    # Warmup models with dummy inference to eliminate cold start latency
+    warmup_text = "Hello."
+    logger.info("Warming up models...")
+
+    if tts_standard_model is not None:
+        logger.info("Warming up ChatterboxTTS (standard)...")
+        try:
+            _ = tts_standard_model.generate(warmup_text, exaggeration=0.5, cfg_weight=0.5)
+            logger.info("ChatterboxTTS warmup complete")
+        except Exception as e:
+            logger.warning(f"ChatterboxTTS warmup failed: {e}")
+
+    if tts_turbo_model is not None:
+        logger.info("Warming up ChatterboxTurboTTS...")
+        try:
+            _ = tts_turbo_model.generate(warmup_text)
+            logger.info("ChatterboxTurboTTS warmup complete")
+        except Exception as e:
+            logger.warning(f"ChatterboxTurboTTS warmup failed: {e}")
+
+    logger.info("All models warmed up and ready for instant inference")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -163,6 +185,7 @@ async def synthesize_and_stream(
 
     try:
         # Select model based on request and availability
+        logger.info(f"[{request.id}] Requested model: {request.model}, voice params: exag={request.voice.exaggeration}, cfg={request.voice.cfg_weight}")
         use_standard = request.model == "standard" and tts_standard_model is not None
 
         if request.language_id != "en" and multilingual_model is not None:
