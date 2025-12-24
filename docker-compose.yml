@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  tts-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TORCH_VERSION: ${TORCH_VERSION:-cpu}
+    image: chatterbox-tts-service:latest
+    container_name: chatterbox-tts
+    restart: unless-stopped
+    environment:
+      # Device: auto, cpu, cuda, mps
+      DEVICE: ${DEVICE:-auto}
+      # WebSocket port
+      PORT: "8081"
+      # Max concurrent synthesis requests per connection
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-3}
+      # Max text length in characters
+      MAX_TEXT_LENGTH: ${MAX_TEXT_LENGTH:-5000}
+      # Optional API token for authentication
+      API_TOKEN: ${API_TOKEN:-}
+      # HuggingFace cache directory
+      HF_HOME: /app/.cache/huggingface
+    ports:
+      - "${TTS_PORT:-8081}:8081"
+    volumes:
+      # Voice prompts for voice cloning
+      - ./voices:/app/voices:ro
+      # HuggingFace model cache (persistent)
+      - hf-cache:/app/.cache/huggingface
+    # GPU support (uncomment for NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8081/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  hf-cache:
+    name: chatterbox-hf-cache

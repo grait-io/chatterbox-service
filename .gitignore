@@ -46,3 +46,14 @@ checkpoints/
 
 # Ignore generated sample .wav files
 **/*.wav
+
+# Voice clone audio files (keep directory but ignore contents)
+voices/*
+!voices/.gitkeep
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/

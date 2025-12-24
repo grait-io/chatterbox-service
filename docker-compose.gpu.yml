@@ -1,0 +1,19 @@
+version: "3.9"
+
+# GPU-enabled configuration for Coolify deployment
+# Use with: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+
+services:
+  tts-service:
+    build:
+      args:
+        TORCH_VERSION: cuda
+    environment:
+      DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
