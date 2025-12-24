@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatterbox TTS Test</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        h1 {
+            color: #00d4ff;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .status {
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+        .status.connected {
+            background: #0a3d0a;
+            border: 1px solid #0f0;
+        }
+        .status.disconnected {
+            background: #3d0a0a;
+            border: 1px solid #f00;
+        }
+        .status.connecting {
+            background: #3d3d0a;
+            border: 1px solid #ff0;
+        }
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 15px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            background: #16213e;
+            color: #fff;
+            font-size: 16px;
+            resize: vertical;
+            margin-bottom: 15px;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #00d4ff;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-speak {
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: #000;
+            flex: 1;
+        }
+        .btn-speak:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.4);
+        }
+        .btn-stop {
+            background: #ff4757;
+            color: #fff;
+        }
+        .btn-stop:hover:not(:disabled) {
+            background: #ff6b7a;
+        }
+        .btn-connect {
+            background: #2ed573;
+            color: #000;
+        }
+        .progress {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .progress-bar {
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4ff, #0099cc);
+            width: 0%;
+            transition: width 0.1s;
+        }
+        .progress-text {
+            font-size: 14px;
+            color: #888;
+        }
+        .log {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 15px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 3px 0;
+        }
+        .log-entry.info { color: #00d4ff; }
+        .log-entry.success { color: #2ed573; }
+        .log-entry.error { color: #ff4757; }
+        .log-entry.data { color: #ffa502; }
+        .examples {
+            margin-top: 20px;
+        }
+        .examples h3 {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .example-btn {
+            background: #16213e;
+            color: #00d4ff;
+            padding: 8px 12px;
+            margin: 0 5px 5px 0;
+            font-size: 13px;
+        }
+        .example-btn:hover {
+            background: #1a2a4e;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎙️ Chatterbox TTS</h1>
+
+    <div id="status" class="status disconnected">Disconnected</div>
+
+    <textarea id="text" placeholder="Enter text to speak...">Hello! This is a test of the Chatterbox text-to-speech system running locally on your Mac.</textarea>
+
+    <div class="controls">
+        <button id="connectBtn" class="btn-connect" onclick="connect()">Connect</button>
+        <button id="speakBtn" class="btn-speak" onclick="speak()" disabled>🔊 Speak</button>
+        <button id="stopBtn" class="btn-stop" onclick="stop()" disabled>Stop</button>
+    </div>
+
+    <div class="progress">
+        <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+        </div>
+        <div id="progressText" class="progress-text">Ready</div>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <div class="examples">
+        <h3>Quick examples:</h3>
+        <button class="example-btn" onclick="setExample('That was an insane headshot! The crowd goes wild!')">Gaming</button>
+        <button class="example-btn" onclick="setExample('Welcome to the stream, everyone! Don\\'t forget to like and subscribe.')">Streaming</button>
+        <button class="example-btn" onclick="setExample('Breaking news: Scientists have discovered a new species of talking parrot that speaks JavaScript.')">News</button>
+        <button class="example-btn" onclick="setExample('[laugh] Oh wow, that was hilarious! [chuckle] I can\\'t believe that just happened.')">With Tags</button>
+    </div>
+
+    <script>
+        let ws = null;
+        let audioContext = null;
+        let audioQueue = [];
+        let isPlaying = false;
+        let currentSource = null;
+        let totalBytes = 0;
+        let startTime = 0;
+
+        const statusEl = document.getElementById('status');
+        const textEl = document.getElementById('text');
+        const connectBtn = document.getElementById('connectBtn');
+        const speakBtn = document.getElementById('speakBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const logEl = document.getElementById('log');
+
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function setStatus(text, type) {
+            statusEl.textContent = text;
+            statusEl.className = `status ${type}`;
+        }
+
+        function setExample(text) {
+            textEl.value = text;
+        }
+
+        function connect() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+                return;
+            }
+
+            setStatus('Connecting...', 'connecting');
+            log('Connecting to ws://localhost:8081/ws/tts...');
+
+            ws = new WebSocket('ws://localhost:8081/ws/tts');
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                log('WebSocket connected', 'success');
+            };
+
+            ws.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    const msg = JSON.parse(event.data);
+                    handleMessage(msg);
+                } else {
+                    handleAudioChunk(event.data);
+                }
+            };
+
+            ws.onclose = () => {
+                setStatus('Disconnected', 'disconnected');
+                log('WebSocket disconnected');
+                speakBtn.disabled = true;
+                connectBtn.textContent = 'Connect';
+            };
+
+            ws.onerror = (error) => {
+                log('WebSocket error: ' + error, 'error');
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'ready':
+                    setStatus(`Connected - Models: ${msg.models.join(', ')}`, 'connected');
+                    log(`Server ready: ${JSON.stringify(msg)}`, 'success');
+                    speakBtn.disabled = false;
+                    connectBtn.textContent = 'Disconnect';
+                    break;
+                case 'done':
+                    const duration = (Date.now() - startTime) / 1000;
+                    log(`Done! Duration: ${msg.duration_ms}ms, Generated in ${duration.toFixed(2)}s`, 'success');
+                    progressText.textContent = `Complete: ${(totalBytes / 1024).toFixed(1)} KB, ${msg.duration_ms}ms audio`;
+                    progressFill.style.width = '100%';
+                    speakBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    break;
+                case 'error':
+                    log(`Error: ${msg.message}`, 'error');
+                    speakBtn.disabled = false;
+                    stopBtn.disabled = true;
+                    break;
+            }
+        }
+
+        function handleAudioChunk(data) {
+            totalBytes += data.byteLength;
+            progressText.textContent = `Receiving: ${(totalBytes / 1024).toFixed(1)} KB`;
+
+            // Convert PCM to AudioBuffer and play
+            const pcmData = new Int16Array(data);
+            const floatData = new Float32Array(pcmData.length);
+            for (let i = 0; i < pcmData.length; i++) {
+                floatData[i] = pcmData[i] / 32768.0;
+            }
+
+            audioQueue.push(floatData);
+
+            if (!isPlaying) {
+                playNextChunk();
+            }
+        }
+
+        async function playNextChunk() {
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                return;
+            }
+
+            isPlaying = true;
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+            }
+
+            // Combine multiple chunks for smoother playback
+            let totalLength = 0;
+            const chunksToPlay = [];
+            while (audioQueue.length > 0 && totalLength < 24000) { // ~1 second buffer
+                const chunk = audioQueue.shift();
+                chunksToPlay.push(chunk);
+                totalLength += chunk.length;
+            }
+
+            const combined = new Float32Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunksToPlay) {
+                combined.set(chunk, offset);
+                offset += chunk.length;
+            }
+
+            const buffer = audioContext.createBuffer(1, combined.length, 24000);
+            buffer.getChannelData(0).set(combined);
+
+            currentSource = audioContext.createBufferSource();
+            currentSource.buffer = buffer;
+            currentSource.connect(audioContext.destination);
+            currentSource.onended = () => {
+                playNextChunk();
+            };
+            currentSource.start();
+        }
+
+        function speak() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Not connected!', 'error');
+                return;
+            }
+
+            const text = textEl.value.trim();
+            if (!text) {
+                log('Please enter some text', 'error');
+                return;
+            }
+
+            // Reset state
+            audioQueue = [];
+            totalBytes = 0;
+            startTime = Date.now();
+            progressFill.style.width = '0%';
+
+            // Initialize audio context on user gesture
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            const request = {
+                type: 'say',
+                id: `req-${Date.now()}`,
+                text: text,
+                language_id: 'en',
+                audio: {
+                    format: 'pcm_s16le',
+                    sample_rate: 24000,
+                    stream: true
+                }
+            };
+
+            log(`Sending: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`, 'data');
+            ws.send(JSON.stringify(request));
+
+            speakBtn.disabled = true;
+            stopBtn.disabled = false;
+            progressText.textContent = 'Generating...';
+        }
+
+        function stop() {
+            if (currentSource) {
+                currentSource.stop();
+                currentSource = null;
+            }
+            audioQueue = [];
+            isPlaying = false;
+            stopBtn.disabled = true;
+            speakBtn.disabled = false;
+            progressText.textContent = 'Stopped';
+        }
+
+        // Auto-connect on load
+        setTimeout(connect, 500);
+    </script>
+</body>
+</html>
