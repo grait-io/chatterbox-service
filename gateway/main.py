@@ -33,8 +33,8 @@ MAX_CONCURRENT_REQUESTS = int(os.getenv("MAX_CONCURRENT_REQUESTS", "3"))
 MAX_TEXT_LENGTH = int(os.getenv("MAX_TEXT_LENGTH", "5000"))
 
 # Global model instances
-tts_model = None
-tts_turbo_model = None
+tts_standard_model = None  # Standard model with expressiveness support
+tts_turbo_model = None     # Turbo model for speed
 multilingual_model = None
 model_lock = asyncio.Lock()
 
@@ -52,11 +52,12 @@ def get_device() -> str:
 
 # Configuration
 LOAD_MULTILINGUAL = os.getenv("LOAD_MULTILINGUAL", "false").lower() == "true"
+LOAD_STANDARD = os.getenv("LOAD_STANDARD", "true").lower() == "true"  # Load expressive model
 
 
 def load_models():
     """Load TTS models on startup."""
-    global tts_turbo_model, multilingual_model
+    global tts_standard_model, tts_turbo_model, multilingual_model
 
     device = get_device()
     logger.info(f"Loading models on device: {device}")
@@ -71,26 +72,35 @@ def load_models():
             return torch_load_original(*args, **kwargs)
         torch.load = patched_torch_load
 
+    # Load standard model with expressiveness support (recommended for commentator style)
+    if LOAD_STANDARD:
+        try:
+            from chatterbox.tts import ChatterboxTTS
+            logger.info("Loading ChatterboxTTS (standard - expressive)...")
+            tts_standard_model = ChatterboxTTS.from_pretrained(device=device)
+            logger.info("ChatterboxTTS loaded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to load ChatterboxTTS: {e}")
+
+    # Load turbo model for speed
     try:
-        # Load turbo model for English (primary use case)
         from chatterbox.tts_turbo import ChatterboxTurboTTS
         logger.info("Loading ChatterboxTurboTTS...")
         tts_turbo_model = ChatterboxTurboTTS.from_pretrained(device=device)
         logger.info("ChatterboxTurboTTS loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load ChatterboxTurboTTS: {e}")
-        raise
+        if tts_standard_model is None:
+            raise  # Need at least one model
 
     if LOAD_MULTILINGUAL:
         try:
-            # Load multilingual model for non-English
             from chatterbox.mtl_tts import ChatterboxMultilingualTTS
             logger.info("Loading ChatterboxMultilingualTTS...")
             multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
             logger.info("ChatterboxMultilingualTTS loaded successfully")
         except Exception as e:
             logger.warning(f"Failed to load ChatterboxMultilingualTTS: {e}")
-            # Non-fatal - we can still serve English
     else:
         logger.info("Skipping ChatterboxMultilingualTTS (LOAD_MULTILINGUAL=false)")
 
@@ -152,23 +162,46 @@ async def synthesize_and_stream(
     start_time = time.time()
 
     try:
-        # Select model based on language
-        if request.language_id == "en" and tts_turbo_model is not None:
-            model = tts_turbo_model
-            model_name = "chatterbox-turbo"
-        elif multilingual_model is not None:
+        # Select model based on request and availability
+        use_standard = request.model == "standard" and tts_standard_model is not None
+
+        if request.language_id != "en" and multilingual_model is not None:
             model = multilingual_model
             model_name = "chatterbox-multilingual"
+            is_standard = False
+        elif use_standard:
+            model = tts_standard_model
+            model_name = "chatterbox-standard"
+            is_standard = True
         elif tts_turbo_model is not None:
             model = tts_turbo_model
             model_name = "chatterbox-turbo"
+            is_standard = False
+        elif tts_standard_model is not None:
+            model = tts_standard_model
+            model_name = "chatterbox-standard"
+            is_standard = True
         else:
             raise RuntimeError("No TTS model available")
 
-        logger.info(f"[{request.id}] Synthesizing with {model_name}: {request.text[:50]}...")
+        # Log with expressiveness params if using standard model
+        if is_standard:
+            logger.info(f"[{request.id}] Synthesizing with {model_name} (exag={request.voice.exaggeration}, cfg={request.voice.cfg_weight}, temp={request.voice.temperature}): {request.text[:50]}...")
+        else:
+            logger.info(f"[{request.id}] Synthesizing with {model_name}: {request.text[:50]}...")
 
         # Prepare generation kwargs
-        gen_kwargs = {"text": request.text}
+        gen_kwargs = {
+            "text": request.text,
+            "temperature": request.voice.temperature,
+            "top_p": request.voice.top_p,
+            "repetition_penalty": request.voice.repetition_penalty,
+        }
+
+        # Add expressiveness params for standard model
+        if is_standard:
+            gen_kwargs["exaggeration"] = request.voice.exaggeration
+            gen_kwargs["cfg_weight"] = request.voice.cfg_weight
 
         # Add voice conditioning if specified
         if request.voice.audio_prompt_path:
@@ -223,6 +256,8 @@ async def synthesize_and_stream(
 async def health_check():
     """Health check endpoint."""
     models_loaded = []
+    if tts_standard_model is not None:
+        models_loaded.append("chatterbox-standard")
     if tts_turbo_model is not None:
         models_loaded.append("chatterbox-turbo")
     if multilingual_model is not None:
@@ -249,10 +284,15 @@ async def websocket_tts(
     await websocket.accept()
     logger.info(f"Client connected: {websocket.client}")
 
-    # Send ready message
-    ready_msg = ReadyMessage()
-    if multilingual_model is None:
-        ready_msg.models = ["chatterbox-turbo"]
+    # Send ready message with available models
+    available_models = []
+    if tts_standard_model is not None:
+        available_models.append("chatterbox-standard")
+    if tts_turbo_model is not None:
+        available_models.append("chatterbox-turbo")
+    if multilingual_model is not None:
+        available_models.append("chatterbox-multilingual")
+    ready_msg = ReadyMessage(models=available_models)
     await websocket.send_text(ready_msg.model_dump_json())
 
     # Track active requests for this client
