@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  chatterbox-tts:
+    build:
+      context: ..
+      dockerfile: rust-tts/Dockerfile
+      target: gpu-production
+    image: chatterbox-tts-rust-gpu:latest
+    container_name: chatterbox-tts-rust-gpu
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8081
+      - DEVICE=cuda
+      - LOAD_STANDARD=true
+      - LOAD_TURBO=false
+      - LOAD_MULTILINGUAL=false
+      - MAX_CONCURRENT_REQUESTS=3
+      - MAX_TEXT_LENGTH=5000
+      - RUST_LOG=chatterbox_tts=info,tower_http=info
+      # CUDA settings
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ../voices:/app/voices:ro
+      - hf-cache:/app/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: '2gb'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+volumes:
+  hf-cache:
+    name: chatterbox-hf-cache-gpu

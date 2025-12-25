@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  chatterbox-tts:
+    build:
+      context: ..
+      dockerfile: rust-tts/Dockerfile
+      target: production
+    image: chatterbox-tts-rust:latest
+    container_name: chatterbox-tts-rust
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8081
+      - DEVICE=auto
+      - LOAD_STANDARD=true
+      - LOAD_TURBO=false
+      - LOAD_MULTILINGUAL=false
+      - MAX_CONCURRENT_REQUESTS=3
+      - MAX_TEXT_LENGTH=5000
+      - RUST_LOG=chatterbox_tts=info,tower_http=info
+    volumes:
+      - ../voices:/app/voices:ro
+      - hf-cache:/app/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  hf-cache:
+    name: chatterbox-hf-cache
