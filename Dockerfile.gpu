@@ -1,7 +1,7 @@
 # Chatterbox TTS WebSocket Service - GPU Version
 # Uses NVIDIA CUDA base image for GPU acceleration
 
-FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -29,8 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Upgrade pip
 RUN python -m pip install --upgrade pip
 
-# Install PyTorch with CUDA 12.1 support
-RUN pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu121
+# Install PyTorch with CUDA 12.4 support
+RUN pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
 # Copy and install chatterbox package
 COPY pyproject.toml .
