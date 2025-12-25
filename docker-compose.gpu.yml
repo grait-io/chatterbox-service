@@ -1,15 +1,20 @@
 version: "3.9"
 
-# GPU-enabled configuration for Coolify deployment
-# Use with: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+# Complete GPU configuration for Coolify deployment with NVIDIA 3090
+# Just run: docker compose -f docker-compose.gpu.yml up -d
 
 services:
-  tts-service:
+  tts-gateway:
     build:
+      context: .
+      dockerfile: Dockerfile
       args:
         TORCH_VERSION: cuda
-    environment:
-      DEVICE: cuda
+    image: chatterbox-tts-gateway:gpu
+    container_name: chatterbox-tts-gpu
+    restart: unless-stopped
+
+    # NVIDIA GPU access
     deploy:
       resources:
         reservations:
@@ -17,3 +22,47 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+    environment:
+      # GPU device
+      DEVICE: cuda
+
+      # Model loading - only load expressive model
+      LOAD_STANDARD: "true"
+      LOAD_TURBO: "false"
+      LOAD_MULTILINGUAL: "false"
+
+      # Server config
+      PORT: "8081"
+      MAX_CONCURRENT_REQUESTS: "3"
+      MAX_TEXT_LENGTH: "5000"
+
+      # Optional: Set API token for authentication
+      # API_TOKEN: "your-secret-token"
+
+      # HuggingFace cache
+      HF_HOME: /app/.cache/huggingface
+
+    ports:
+      - "8081:8081"
+
+    volumes:
+      # Voice prompts for voice cloning (optional)
+      - ./voices:/app/voices:ro
+      # Model cache - persists across restarts
+      - hf-cache:/app/.cache/huggingface
+
+    # Shared memory for PyTorch
+    shm_size: "2gb"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Model loading takes time on first run
+      start_period: 300s
+
+volumes:
+  hf-cache:
+    name: chatterbox-hf-cache
