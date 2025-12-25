@@ -1,51 +1,244 @@
-# Chatterbox TTS - Rust Inference Service
+# Chatterbox TTS
 
-High-performance Text-to-Speech inference service using Chatterbox models, implemented in Rust with Python interop via PyO3.
+A high-performance Rust library for Text-to-Speech synthesis using [Chatterbox](https://github.com/resemble-ai/chatterbox) models.
+
+[![Crates.io](https://img.shields.io/crates/v/chatterbox-tts.svg)](https://crates.io/crates/chatterbox-tts)
+[![Documentation](https://docs.rs/chatterbox-tts/badge.svg)](https://docs.rs/chatterbox-tts)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
 
-- **High Performance**: Rust-based server with async I/O using Tokio and Axum
-- **Model Preloading**: Models are loaded on startup for instant inference
-- **Voice Cloning**: Set a reference voice file for all TTS requests
-- **Multiple Models**: Support for Standard (expressive), Turbo (fast), and Multilingual models
-- **Streaming Audio**: WebSocket API with chunked audio streaming
-- **HTTP API**: RESTful endpoints for synchronous TTS generation
-- **Flexible Configuration**: Environment-based configuration
+- **Voice Cloning**: Clone any voice from a short audio sample (5-10 seconds)
+- **Expressive Speech**: Control emotional intensity and pacing
+- **Multiple Models**: Standard (expressive), Turbo (fast), Multilingual (23 languages)
+- **Streaming**: Real-time audio streaming for low-latency applications
+- **Easy Integration**: Simple API for embedding TTS in your Rust applications
+- **Optional Server**: HTTP/WebSocket server available via feature flag
 
-## Architecture
+## Installation
 
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+chatterbox-tts = "0.1"
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Rust TTS Server                          │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │   HTTP API   │  │ WebSocket API│  │  Voice Manager   │  │
-│  │  (Axum)      │  │  (Axum WS)   │  │                  │  │
-│  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘  │
-│         │                 │                    │            │
-│  ┌──────▼─────────────────▼────────────────────▼─────────┐  │
-│  │                  TTS Model Manager                     │  │
-│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────┐  │  │
-│  │  │  Standard   │ │   Turbo     │ │  Multilingual   │  │  │
-│  │  │  (PyO3)     │ │   (PyO3)    │ │    (PyO3)       │  │  │
-│  │  └─────────────┘ └─────────────┘ └─────────────────┘  │  │
-│  └───────────────────────┬───────────────────────────────┘  │
-│                          │                                   │
-│  ┌───────────────────────▼───────────────────────────────┐  │
-│  │              Python Runtime (PyO3)                     │  │
-│  │  ┌─────────────────────────────────────────────────┐  │  │
-│  │  │           Chatterbox TTS Models                 │  │  │
-│  │  │  - T3 (Text-to-Token)                          │  │  │
-│  │  │  - S3Gen (Token-to-Waveform)                   │  │  │
-│  │  │  - Voice Encoder                               │  │  │
-│  │  └─────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+
+For server functionality:
+
+```toml
+[dependencies]
+chatterbox-tts = { version = "0.1", features = ["server"] }
 ```
+
+### Prerequisites
+
+- Python 3.10+ with the Chatterbox package installed
+- PyTorch with CUDA support (optional, for GPU acceleration)
 
 ## Quick Start
 
-### Using Docker
+### Basic Usage
+
+```rust
+use chatterbox_tts::ChatterboxTts;
+
+fn main() -> chatterbox_tts::Result<()> {
+    // Initialize the TTS engine
+    let mut tts = ChatterboxTts::new()?;
+
+    // Load the model (downloads on first run)
+    tts.load_model()?;
+
+    // Generate speech
+    let audio = tts.synthesize("Hello, world!")?;
+
+    // Save to file
+    audio.save_wav("output.wav")?;
+
+    Ok(())
+}
+```
+
+### Voice Cloning
+
+```rust
+use chatterbox_tts::{ChatterboxTts, VoiceConfig};
+
+fn main() -> chatterbox_tts::Result<()> {
+    let mut tts = ChatterboxTts::new()?;
+    tts.load_model()?;
+
+    // Set a reference voice (5-10 seconds of clear speech)
+    tts.set_voice("path/to/reference.wav")?;
+
+    // Generate with custom parameters
+    let audio = tts.synthesize_with_config(
+        "This will sound like the reference voice!",
+        VoiceConfig::default()
+            .exaggeration(0.7)  // Emotional intensity
+            .cfg_weight(0.5),   // Pacing control
+    )?;
+
+    audio.save_wav("cloned_voice.wav")?;
+    Ok(())
+}
+```
+
+### Using the Builder Pattern
+
+```rust
+use chatterbox_tts::{ChatterboxTtsBuilder, ModelType, VoiceConfig};
+
+fn main() -> chatterbox_tts::Result<()> {
+    let tts = ChatterboxTtsBuilder::new()
+        .device("cuda")                    // Use GPU
+        .model_type(ModelType::Standard)   // Expressive model
+        .voice("path/to/voice.wav")        // Default voice
+        .default_config(
+            VoiceConfig::default()
+                .exaggeration(0.6)
+                .temperature(0.9)
+        )
+        .auto_load()                       // Load model immediately
+        .with_warmup()                     // Warmup for fast inference
+        .build()?;
+
+    let audio = tts.synthesize("Ready for fast inference!")?;
+    audio.save_wav("output.wav")?;
+
+    Ok(())
+}
+```
+
+### Streaming Audio
+
+```rust
+use chatterbox_tts::ChatterboxTts;
+
+fn main() -> chatterbox_tts::Result<()> {
+    let mut tts = ChatterboxTts::new()?;
+    tts.load_model()?;
+
+    let audio = tts.synthesize("Long text for streaming...")?;
+
+    // Chunk into 40ms pieces for real-time playback
+    let chunks = audio.chunk_pcm(40);
+
+    for chunk in chunks {
+        // Send chunk to audio player or network stream
+        play_audio_chunk(&chunk);
+    }
+
+    Ok(())
+}
+```
+
+### Using the Prelude
+
+```rust
+use chatterbox_tts::prelude::*;
+
+fn main() -> Result<()> {
+    let mut tts = ChatterboxTts::new()?;
+    tts.load_model()?;
+
+    let audio = tts.synthesize("Hello!")?;
+    audio.save_wav("hello.wav")?;
+
+    Ok(())
+}
+```
+
+## API Reference
+
+### ChatterboxTts
+
+The main TTS interface.
+
+```rust
+// Creation
+ChatterboxTts::new()?;                    // Default settings
+ChatterboxTts::with_device("cuda")?;      // Specific device
+ChatterboxTts::with_config(config)?;      // Custom configuration
+
+// Model loading
+tts.load_model()?;                        // Load standard model
+tts.load_model_type(ModelType::Turbo)?;   // Load specific model
+tts.load_all_models()?;                   // Load all models
+tts.warmup()?;                            // Warmup for fast inference
+
+// Voice configuration
+tts.set_voice("path/to/voice.wav")?;      // Set default voice
+tts.clear_voice();                        // Clear default voice
+tts.set_default_config(config);           // Set default parameters
+
+// Synthesis
+tts.synthesize("text")?;                  // Using defaults
+tts.synthesize_with_config("text", config)?;  // Custom parameters
+tts.synthesize_multilingual("text", "es")?;   // Multilingual
+```
+
+### VoiceConfig
+
+Voice and generation parameters.
+
+```rust
+VoiceConfig::default()
+    .exaggeration(0.7)        // 0.0-2.0, emotional intensity
+    .cfg_weight(0.5)          // 0.0-1.0, pacing control
+    .temperature(0.8)         // 0.1-1.5, sampling diversity
+    .top_p(0.95)              // 0.0-1.0, nucleus sampling
+    .repetition_penalty(1.2)  // ≥1.0, repetition penalty
+```
+
+### AudioOutput
+
+Generated audio with utility methods.
+
+```rust
+audio.save_wav("output.wav")?;      // Save as WAV
+audio.save_pcm("output.pcm")?;      // Save as raw PCM
+audio.to_wav();                     // Get WAV bytes
+audio.to_pcm_s16le();               // Get PCM bytes
+audio.chunk(40);                    // Chunk into 40ms pieces
+audio.chunk_pcm(40);                // Chunk as PCM bytes
+audio.duration_seconds;             // Audio duration
+audio.sample_rate;                  // Sample rate (24000)
+```
+
+## Examples
+
+Run the examples:
+
+```bash
+# Simple TTS
+cargo run --example simple_tts
+
+# Voice cloning
+cargo run --example voice_cloning -- path/to/voice.wav
+
+# Streaming (requires server feature)
+cargo run --example streaming --features server
+```
+
+## Feature Flags
+
+| Feature | Description |
+|---------|-------------|
+| `default` | Core TTS functionality only |
+| `server` | HTTP/WebSocket server |
+| `full` | All features enabled |
+
+## Server Mode
+
+When built with the `server` feature, you can run a standalone TTS server:
+
+```bash
+cargo run --bin chatterbox-server --features server
+```
+
+Or use Docker:
 
 ```bash
 # CPU version
@@ -55,155 +248,40 @@ docker-compose -f docker-compose.yml up -d
 docker-compose -f docker-compose.gpu.yml up -d
 ```
 
-### Building from Source
+### Server API
 
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+#### HTTP Endpoints
 
-# Build
-cd rust-tts
-cargo build --release
-
-# Run
-./target/release/chatterbox-server
-```
-
-## API Reference
-
-### HTTP Endpoints
-
-#### Health Check
-```http
-GET /health
-```
-
-Response:
-```json
-{
-  "status": "healthy",
-  "loaded_models": ["standard"],
-  "device": "cuda",
-  "version": "0.1.0"
-}
-```
-
-#### Generate TTS
 ```http
 POST /api/tts
 Content-Type: application/json
 
 {
   "text": "Hello, world!",
-  "model": "standard",
   "voice": {
-    "audio_prompt_path": "/app/voices/my_voice.wav",
     "exaggeration": 0.5,
-    "cfg_weight": 0.5,
-    "temperature": 0.8,
-    "top_p": 0.95,
-    "repetition_penalty": 1.2
-  },
-  "audio": {
-    "format": "wav"
+    "cfg_weight": 0.5
   }
 }
 ```
 
-Response: Audio file (WAV or PCM)
+#### WebSocket Streaming
 
-#### Set Default Voice
-```http
-POST /api/voice/default
-Content-Type: application/json
+```javascript
+const ws = new WebSocket("ws://localhost:8081/ws/tts");
 
-{
-  "voice_path": "my_voice.wav"
-}
-```
+ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "chunk") {
+        // Process audio chunk
+    }
+};
 
-#### Get Default Voice
-```http
-GET /api/voice/default
-```
-
-#### List Available Voices
-```http
-GET /api/voices
-```
-
-#### Upload Voice File
-```http
-POST /api/voices/upload
-Content-Type: multipart/form-data
-
-file: <audio file>
-```
-
-### WebSocket API
-
-Connect to `/ws/tts` for real-time streaming TTS.
-
-#### Ready Message (Server → Client)
-```json
-{
-  "type": "ready",
-  "models": ["standard"],
-  "device": "cuda"
-}
-```
-
-#### Say Request (Client → Server)
-```json
-{
-  "type": "say",
-  "id": "unique-request-id",
-  "text": "Hello, world!",
-  "model": "standard",
-  "language_id": "en",
-  "voice": {
-    "audio_prompt_path": "/app/voices/my_voice.wav",
-    "exaggeration": 0.5,
-    "cfg_weight": 0.5,
-    "temperature": 0.8,
-    "top_p": 0.95,
-    "repetition_penalty": 1.2
-  },
-  "audio": {
-    "format": "pcm_s16le",
-    "sample_rate": 24000,
-    "stream": true,
-    "chunk_size_ms": 40
-  }
-}
-```
-
-#### Chunk Message (Server → Client)
-```json
-{
-  "type": "chunk",
-  "id": "unique-request-id",
-  "index": 0,
-  "data": "<base64-encoded-audio>",
-  "is_last": false
-}
-```
-
-#### Done Message (Server → Client)
-```json
-{
-  "type": "done",
-  "id": "unique-request-id",
-  "duration_seconds": 2.5
-}
-```
-
-#### Set Voice Request (Client → Server)
-```json
-{
-  "type": "set_voice",
-  "voice_path": "my_voice.wav"
-}
+ws.send(JSON.stringify({
+    type: "say",
+    text: "Hello!",
+    audio: { stream: true, chunk_size_ms: 40 }
+}));
 ```
 
 ## Configuration
@@ -212,111 +290,40 @@ Connect to `/ws/tts` for real-time streaming TTS.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `DEVICE` | `auto` | Device: `auto`, `cpu`, `cuda`, `mps` |
+| `CHATTERBOX_SRC` | | Path to Chatterbox Python source |
+| `HF_HOME` | | HuggingFace cache directory |
+
+### Server-specific Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `8081` | Server port |
-| `DEVICE` | `auto` | Device to use (`auto`, `cpu`, `cuda`, `mps`) |
-| `LOAD_STANDARD` | `true` | Load standard (expressive) model |
-| `LOAD_TURBO` | `false` | Load turbo (fast) model |
-| `LOAD_MULTILINGUAL` | `false` | Load multilingual model |
-| `MAX_CONCURRENT_REQUESTS` | `3` | Maximum concurrent TTS requests |
-| `MAX_TEXT_LENGTH` | `5000` | Maximum text length in characters |
-| `VOICES_DIR` | `./voices` | Directory for voice reference files |
-| `DEFAULT_VOICE` | | Default voice file path |
-| `HF_HOME` | | HuggingFace cache directory |
-| `API_TOKEN` | | API authentication token (optional) |
-| `RUST_LOG` | `info` | Logging level |
+| `LOAD_STANDARD` | `true` | Load standard model |
+| `LOAD_TURBO` | `false` | Load turbo model |
+| `VOICES_DIR` | `./voices` | Voice files directory |
 
 ## Voice Parameters
 
-| Parameter | Range | Default | Description |
-|-----------|-------|---------|-------------|
-| `exaggeration` | 0.0-2.0 | 0.5 | Emotional intensity (standard only) |
-| `cfg_weight` | 0.0-1.0 | 0.5 | Pacing control (standard only) |
-| `temperature` | 0.1-1.5 | 0.8 | Sampling diversity |
-| `top_p` | 0.0-1.0 | 0.95 | Nucleus sampling threshold |
-| `repetition_penalty` | ≥1.0 | 1.2 | Repetition penalty |
+| Parameter | Range | Default | Model | Description |
+|-----------|-------|---------|-------|-------------|
+| `exaggeration` | 0.0-2.0 | 0.5 | Standard | Emotional intensity |
+| `cfg_weight` | 0.0-1.0 | 0.5 | Standard | Pacing control |
+| `temperature` | 0.1-1.5 | 0.8 | All | Sampling diversity |
+| `top_p` | 0.0-1.0 | 0.95 | All | Nucleus sampling |
+| `repetition_penalty` | ≥1.0 | 1.2 | All | Repetition penalty |
 
-## Voice Reference Files
+## Supported Languages (Multilingual Model)
 
-- **Format**: WAV, MP3, FLAC
-- **Duration**: 5-10 seconds of clear speech
-- **Quality**: 16kHz+ sample rate recommended
-- **Content**: Clear speech without background noise
-
-### Setting Default Voice
-
-You can set a default voice that will be used for all TTS requests:
-
-```bash
-# Via HTTP API
-curl -X POST http://localhost:8081/api/voice/default \
-  -H "Content-Type: application/json" \
-  -d '{"voice_path": "my_voice.wav"}'
-
-# Via WebSocket
-{"type": "set_voice", "voice_path": "my_voice.wav"}
-```
-
-## Examples
-
-### Python Client
-
-```python
-import requests
-import json
-
-# Generate TTS
-response = requests.post(
-    "http://localhost:8081/api/tts",
-    json={
-        "text": "Hello, this is a test.",
-        "voice": {
-            "exaggeration": 0.7,
-            "cfg_weight": 0.5
-        }
-    }
-)
-
-with open("output.wav", "wb") as f:
-    f.write(response.content)
-```
-
-### WebSocket Client (JavaScript)
-
-```javascript
-const ws = new WebSocket("ws://localhost:8081/ws/tts");
-
-ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-
-    if (msg.type === "ready") {
-        // Server is ready, send request
-        ws.send(JSON.stringify({
-            type: "say",
-            id: "request-1",
-            text: "Hello, world!",
-            voice: {
-                exaggeration: 0.5
-            },
-            audio: {
-                stream: true,
-                chunk_size_ms: 40
-            }
-        }));
-    } else if (msg.type === "chunk") {
-        // Process audio chunk
-        const audioData = atob(msg.data);
-        // Play or buffer audio...
-    } else if (msg.type === "done") {
-        console.log(`Generation complete: ${msg.duration_seconds}s`);
-    }
-};
-```
+English, Spanish, French, German, Italian, Portuguese, Dutch, Polish, Russian,
+Swedish, Norwegian, Danish, Finnish, Greek, Chinese, Japanese, Korean, Hindi,
+Arabic, Hebrew, Turkish, Malay, Swahili
 
 ## Performance
 
-| Model | Device | Latency (first token) | RTF |
-|-------|--------|----------------------|-----|
+| Model | Device | First Token | RTF |
+|-------|--------|-------------|-----|
 | Standard | CUDA (3090) | ~200ms | 0.15x |
 | Standard | CPU (8 cores) | ~2s | 1.5x |
 | Turbo | CUDA (3090) | ~100ms | 0.08x |
@@ -326,4 +333,8 @@ ws.onmessage = (event) => {
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

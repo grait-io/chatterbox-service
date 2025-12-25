@@ -3,8 +3,14 @@
 //! High-performance Text-to-Speech inference service using Chatterbox models.
 //! This server provides HTTP and WebSocket APIs for TTS generation with
 //! support for voice cloning, expressiveness control, and streaming audio output.
+//!
+//! # Running the Server
+//!
+//! ```bash
+//! cargo run --bin chatterbox-server --features server
+//! ```
 
-use chatterbox_tts::{Config, Server};
+use chatterbox_tts::{server::Server, Config};
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -34,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("  Load Standard: {}", config.model.load_standard);
     tracing::info!("  Load Turbo: {}", config.model.load_turbo);
     tracing::info!("  Load Multilingual: {}", config.model.load_multilingual);
-    tracing::info!("  Voices Directory: {}", config.voice.voices_directory.display());
+    tracing::info!(
+        "  Voices Directory: {}",
+        config.voice.voices_directory.display()
+    );
 
     // Initialize Python
     let chatterbox_src = std::env::var("CHATTERBOX_SRC")
@@ -51,10 +60,10 @@ async fn main() -> anyhow::Result<()> {
         });
 
     tracing::info!("Initializing Python runtime...");
-    chatterbox_tts::python::initialize_python(chatterbox_src.as_deref())?;
+    chatterbox_tts::initialize_python(chatterbox_src.as_deref())?;
 
     // Get PyTorch info
-    let (torch_version, device) = chatterbox_tts::python::get_torch_info();
+    let (torch_version, device) = chatterbox_tts::get_torch_info();
     tracing::info!("PyTorch version: {}", torch_version);
     tracing::info!("Detected device: {}", device);
 

@@ -154,6 +154,19 @@ impl GenerationParams {
 }
 
 /// Audio output from TTS generation
+///
+/// Contains the synthesized audio samples along with metadata.
+/// Provides methods for saving to files and streaming.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use chatterbox_tts::AudioOutput;
+///
+/// let audio = AudioOutput::new(vec![0.0; 24000], 24000);
+/// audio.save_wav("output.wav")?;
+/// # Ok::<(), chatterbox_tts::TtsError>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct AudioOutput {
     /// Raw audio samples (24kHz, mono, f32)
@@ -175,6 +188,55 @@ impl AudioOutput {
         }
     }
 
+    /// Save audio to a WAV file
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the output WAV file
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # let audio = chatterbox_tts::AudioOutput::new(vec![0.0; 24000], 24000);
+    /// audio.save_wav("speech.wav")?;
+    /// # Ok::<(), chatterbox_tts::TtsError>(())
+    /// ```
+    pub fn save_wav<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: self.sample_rate,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let mut writer = hound::WavWriter::create(path, spec)
+            .map_err(|e| TtsError::AudioProcessing(format!("Failed to create WAV file: {}", e)))?;
+
+        for sample in &self.samples {
+            let clamped = sample.clamp(-1.0, 1.0);
+            let int_sample = (clamped * 32767.0) as i16;
+            writer.write_sample(int_sample)
+                .map_err(|e| TtsError::AudioProcessing(format!("Failed to write sample: {}", e)))?;
+        }
+
+        writer.finalize()
+            .map_err(|e| TtsError::AudioProcessing(format!("Failed to finalize WAV: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Save audio to a raw PCM file (S16LE format)
+    pub fn save_pcm<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let pcm = self.to_pcm_s16le();
+        std::fs::write(path, pcm)?;
+        Ok(())
+    }
+
+    /// Convert to WAV bytes (in-memory)
+    pub fn to_wav(&self) -> Vec<u8> {
+        crate::audio::samples_to_wav(&self.samples, self.sample_rate)
+    }
+
     /// Convert to PCM S16LE bytes
     pub fn to_pcm_s16le(&self) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(self.samples.len() * 2);
@@ -187,6 +249,10 @@ impl AudioOutput {
     }
 
     /// Chunk audio into fixed-size pieces for streaming
+    ///
+    /// # Arguments
+    ///
+    /// * `chunk_size_ms` - Size of each chunk in milliseconds
     pub fn chunk(&self, chunk_size_ms: u32) -> Vec<Vec<f32>> {
         let samples_per_chunk = (self.sample_rate * chunk_size_ms / 1000) as usize;
         self.samples
@@ -196,6 +262,10 @@ impl AudioOutput {
     }
 
     /// Chunk audio into PCM S16LE bytes for streaming
+    ///
+    /// # Arguments
+    ///
+    /// * `chunk_size_ms` - Size of each chunk in milliseconds
     pub fn chunk_pcm(&self, chunk_size_ms: u32) -> Vec<Vec<u8>> {
         let samples_per_chunk = (self.sample_rate * chunk_size_ms / 1000) as usize;
         self.samples
@@ -210,6 +280,16 @@ impl AudioOutput {
                 bytes
             })
             .collect()
+    }
+
+    /// Get the number of samples
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Check if the audio is empty
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
     }
 }
 
